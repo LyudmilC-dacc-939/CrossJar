@@ -93,24 +93,33 @@ func main() {
 		panic(err)
 	}
 
-	// Prepare build command with cross-compilation settings
-	cmd := exec.Command("go", "build", "-o", *outputExe, tmpDir)
-	
-	// Set up environment for cross-compilation
-	env := os.Environ()
-	env = append(env, "CGO_ENABLED=0") // Disable CGO for static binaries
-	env = append(env, "GOOS="+*targetOS)
-	env = append(env, "GOARCH="+*targetArch)
-	cmd.Env = env
+	goModPath := filepath.Join(tmpDir, "go.mod")
+if err := os.WriteFile(goModPath, []byte("module tempbuild\ngo 1.21\n"), 0644); err != nil {
+    fmt.Printf("Error creating temp module: %v\n", err)
+    os.Exit(1)
+}
+
+cmd := exec.Command("go", "build", "-mod=mod", "-o", *outputExe, ".")
+cmd.Dir = tmpDir  // Critical change
+
+env := os.Environ()
+env = append(env, "CGO_ENABLED=0")
+env = append(env, "GOOS="+*targetOS)
+env = append(env, "GOARCH="+*targetArch)
+env = append(env, "GO111MODULE=on")  // Force module mode
+cmd.Env = env
 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	
+	// Execute build command with error handling
 	if err := cmd.Run(); err != nil {
-		panic(err)
+		fmt.Printf("Error building executable: %v\n", err)
+		os.Exit(1)
 	}
 
 	fmt.Printf("Successfully created %s for %s/%s\n", *outputExe, *targetOS, *targetArch)
-}
+	}
 
 func copyFile(src, dest string) error {
 	in, err := os.Open(src)
@@ -130,18 +139,23 @@ func copyFile(src, dest string) error {
 }
 
 func generateMainGo(tmpDir, jarName string) error {
-	tmpl, err := template.New("gocode").Parse(goCodeTemplate)
-	if err != nil {
-		return err
-	}
+    goModPath := filepath.Join(tmpDir, "go.mod")
+    if err := os.WriteFile(goModPath, []byte("module tempbuild\ngo 1.21\n"), 0644); err != nil {
+        return err
+    } 
 
-	mainGoPath := filepath.Join(tmpDir, "main.go")
-	file, err := os.Create(mainGoPath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
+    tmpl, err := template.New("gocode").Parse(goCodeTemplate)
+    if err != nil {
+        return err
+    }
 
-	data := struct{ JarName string }{JarName: jarName}
-	return tmpl.Execute(file, data)
-}
+    mainGoPath := filepath.Join(tmpDir, "main.go")
+    file, err := os.Create(mainGoPath)
+    if err != nil {
+        return err
+    }
+    defer file.Close()
+
+    data := struct{ JarName string }{JarName: jarName}
+    return tmpl.Execute(file, data)
+} 
